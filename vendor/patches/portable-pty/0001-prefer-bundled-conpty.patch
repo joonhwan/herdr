@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: herdr fork <local>
+Date: Fri, 17 Jul 2026 00:00:00 +0000
+Subject: [PATCH] prefer a conpty.dll bundled next to the herdr executable
+
+Some Windows builds ship an in-box ConPTY that tears down the pseudoconsole
+when a TUI app switches to the alternate screen buffer, which kills the pane's
+shell. Load a newer conpty.dll from the herdr executable's own directory (a
+trusted absolute path, never a bare name resolved via PATH/CWD, see #761),
+falling back to the system ConPTY when the bundled pair is absent.
+
+Herdr issue: https://github.com/ogulcancelik/herdr/issues/761
+Vendored base: portable-pty 0.9.0
+---
+diff --git a/vendor/portable-pty/src/win/psuedocon.rs b/vendor/portable-pty/src/win/psuedocon.rs
+index 13c7c5d..437d85d 100644
+--- a/vendor/portable-pty/src/win/psuedocon.rs
++++ b/vendor/portable-pty/src/win/psuedocon.rs
+@@ -49,14 +49,25 @@ fn load_conpty() -> ConPtyFuncs {
+         "this system does not support conpty.  Windows 10 October 2018 or newer is required",
+     );
+ 
+-    // We prefer to use a sideloaded conpty.dll and openconsole.exe host deployed
+-    // alongside the application.  We check for this after checking for kernel
+-    // support so that we don't try to proceed and do something crazy.
+-    if let Ok(sideloaded) = ConPtyFuncs::open(Path::new("conpty.dll")) {
+-        sideloaded
+-    } else {
+-        kernel
++    // Prefer a newer conpty.dll bundled next to the herdr executable. Some
++    // Windows builds ship an in-box ConPTY that tears down the pseudoconsole
++    // when a TUI app switches to the alternate screen buffer (e.g. an editor
++    // launched from Claude Code), which kills the pane's shell. We load only
++    // from the executable's own directory (a trusted absolute path) and never a
++    // bare `conpty.dll` from PATH/CWD (see herdr #761); we fall back to the
++    // system ConPTY (kernel32) when the bundled pair is absent.
++    if let Ok(exe) = std::env::current_exe() {
++        if let Some(dir) = exe.parent() {
++            let bundled = dir.join("conpty.dll");
++            if bundled.exists() {
++                if let Ok(sideloaded) = ConPtyFuncs::open(&bundled) {
++                    return sideloaded;
++                }
++            }
++        }
+     }
++
++    kernel
+ }
+ 
+ lazy_static! {

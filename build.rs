@@ -90,4 +90,32 @@ fn main() {
     } else {
         println!("cargo:rustc-link-lib=static=ghostty-vt");
     }
+
+    copy_bundled_conpty(&manifest_dir, &target);
+}
+
+// Windows: copy the bundled ConPTY host (conpty.dll + OpenConsole.exe) next to
+// the built executable. The vendored portable-pty loads conpty.dll from the
+// executable's own directory so herdr does not rely on the (sometimes buggy)
+// in-box system ConPTY. No-op on non-Windows targets and when the pair is not
+// vendored for the target.
+fn copy_bundled_conpty(manifest_dir: &std::path::Path, target: &str) {
+    if !target.contains("windows") {
+        return;
+    }
+    println!("cargo:rerun-if-changed=vendor/conpty");
+    let src_dir = manifest_dir.join("vendor/conpty").join(target);
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
+    // OUT_DIR = <target-dir>/[<triple>/]<profile>/build/<crate>-<hash>/out
+    let Some(profile_dir) = PathBuf::from(&out_dir).ancestors().nth(3).map(PathBuf::from) else {
+        return;
+    };
+    for name in ["conpty.dll", "OpenConsole.exe"] {
+        let src = src_dir.join(name);
+        if src.exists() {
+            if let Err(err) = fs::copy(&src, profile_dir.join(name)) {
+                println!("cargo:warning=failed to copy bundled {name}: {err}");
+            }
+        }
+    }
 }

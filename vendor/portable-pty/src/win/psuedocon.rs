@@ -49,6 +49,24 @@ fn load_conpty() -> ConPtyFuncs {
         "this system does not support conpty.  Windows 10 October 2018 or newer is required",
     );
 
+    // Prefer a newer conpty.dll bundled next to the herdr executable. Some
+    // Windows builds ship an in-box ConPTY that tears down the pseudoconsole
+    // when a TUI app switches to the alternate screen buffer (e.g. an editor
+    // launched from Claude Code), which kills the pane's shell. We load only
+    // from the executable's own directory (a trusted absolute path) and never a
+    // bare `conpty.dll` from PATH/CWD (see herdr #761); we fall back to the
+    // system ConPTY (kernel32) when the bundled pair is absent.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundled = dir.join("conpty.dll");
+            if bundled.exists() {
+                if let Ok(sideloaded) = ConPtyFuncs::open(&bundled) {
+                    return sideloaded;
+                }
+            }
+        }
+    }
+
     kernel
 }
 
