@@ -1216,6 +1216,7 @@ fn render_workspace_list(
     let cards = &app.view.workspace_card_areas;
     let entries = workspace_list_entries(app);
 
+    let visible_order = app.visible_workspace_order();
     for card in cards {
         let i = card.ws_idx;
         let ws = &app.workspaces[i];
@@ -1226,6 +1227,7 @@ fn render_workspace_list(
         let is_dragged = dragged_ws_idx == Some(i);
         let highlighted = selected || is_active || is_dragged;
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
+        let visual_idx = visible_order.iter().position(|idx| *idx == i).map(|pos| pos + 1);
 
         if highlighted {
             let bg = if selected {
@@ -1331,9 +1333,47 @@ fn render_workspace_list(
             } else {
                 0
             };
+            let nav_num_str;
+            let card_state_icon = if is_navigating && row_index == 0 {
+                if let Some(v_idx) = visual_idx {
+                    nav_num_str = format!("{v_idx}");
+                    let style = if selected {
+                        Style::default().fg(p.overlay1).add_modifier(Modifier::BOLD)
+                    } else if is_active {
+                        Style::default().fg(p.text).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD)
+                    };
+                    (nav_num_str.as_str(), style)
+                } else {
+                    state_icon
+                }
+            } else {
+                state_icon
+            };
+
+            let mut resolved_row_storage;
+            let effective_resolved = if is_navigating
+                && row_index == 0
+                && visual_idx.is_some()
+                && !resolved
+                    .iter()
+                    .any(|t| matches!(t.kind, tokens::ResolvedTokenKind::StateIcon))
+            {
+                resolved_row_storage = Vec::with_capacity(resolved.len() + 1);
+                resolved_row_storage.push(tokens::ResolvedToken::new(
+                    tokens::ResolvedTokenKind::StateIcon,
+                    crate::config::SidebarTokenStyle::default(),
+                ));
+                resolved_row_storage.extend(resolved.iter().cloned());
+                &resolved_row_storage
+            } else {
+                resolved
+            };
+
             spans.extend(resolved_token_spans(
-                resolved,
-                state_icon,
+                effective_resolved,
+                card_state_icon,
                 state_text_style,
                 name_style,
                 branch_style,
@@ -2843,5 +2883,59 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 },
             ]
         );
+    }
+
+    #[test]
+    fn expanded_sidebar_workspace_list_renders_number_indexes_in_navigate_mode() {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("main"),
+            Workspace::test_new("issue"),
+            Workspace::test_new("notes"),
+        ];
+        app.sidebar_spaces.rows = vec![vec![
+            crate::config::SpaceSidebarToken::StateIcon,
+            crate::config::SpaceSidebarToken::Workspace,
+        ]];
+        app.sidebar_spaces.row_gap = 0;
+        let area = Rect::new(0, 0, 30, 20);
+        app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
+        let list_area = workspace_list_rect(area, app.sidebar_section_split);
+
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_workspace_list(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    list_area,
+                    false,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let cards = &app.view.workspace_card_areas;
+        assert_eq!(buffer[(cards[0].rect.x + 1, cards[0].rect.y)].symbol(), "·");
+        assert_eq!(buffer[(cards[1].rect.x + 1, cards[1].rect.y)].symbol(), "·");
+        assert_eq!(buffer[(cards[2].rect.x + 1, cards[2].rect.y)].symbol(), "·");
+
+        app.mode = Mode::Navigate;
+        let mut nav_terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        nav_terminal
+            .draw(|frame| {
+                render_workspace_list(
+                    &app,
+                    &TerminalRuntimeRegistry::new(),
+                    frame,
+                    list_area,
+                    true,
+                )
+            })
+            .unwrap();
+        let nav_buffer = nav_terminal.backend().buffer();
+        assert_eq!(nav_buffer[(cards[0].rect.x + 1, cards[0].rect.y)].symbol(), "1");
+        assert_eq!(nav_buffer[(cards[1].rect.x + 1, cards[1].rect.y)].symbol(), "2");
+        assert_eq!(nav_buffer[(cards[2].rect.x + 1, cards[2].rect.y)].symbol(), "3");
     }
 }
