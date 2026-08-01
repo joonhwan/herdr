@@ -1333,9 +1333,10 @@ fn render_workspace_list(
             } else {
                 0
             };
+            let nav_visual_idx = visual_idx.filter(|&idx| (1..=9).contains(&idx));
             let nav_num_str;
             let card_state_icon = if is_navigating && row_index == 0 {
-                if let Some(v_idx) = visual_idx {
+                if let Some(v_idx) = nav_visual_idx {
                     nav_num_str = format!("{v_idx}");
                     let style = if selected {
                         Style::default().fg(p.overlay1).add_modifier(Modifier::BOLD)
@@ -1355,7 +1356,7 @@ fn render_workspace_list(
             let mut resolved_row_storage;
             let effective_resolved = if is_navigating
                 && row_index == 0
-                && visual_idx.is_some()
+                && nav_visual_idx.is_some()
                 && !resolved
                     .iter()
                     .any(|t| matches!(t.kind, tokens::ResolvedTokenKind::StateIcon))
@@ -2888,17 +2889,15 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     #[test]
     fn expanded_sidebar_workspace_list_renders_number_indexes_in_navigate_mode() {
         let mut app = AppState::test_new();
-        app.workspaces = vec![
-            Workspace::test_new("main"),
-            Workspace::test_new("issue"),
-            Workspace::test_new("notes"),
-        ];
+        app.workspaces = (1..=10)
+            .map(|i| Workspace::test_new(&format!("ws-{i}")))
+            .collect();
         app.sidebar_spaces.rows = vec![vec![
             crate::config::SpaceSidebarToken::StateIcon,
             crate::config::SpaceSidebarToken::Workspace,
         ]];
         app.sidebar_spaces.row_gap = 0;
-        let area = Rect::new(0, 0, 30, 20);
+        let area = Rect::new(0, 0, 30, 30);
         app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
         let list_area = workspace_list_rect(area, app.sidebar_section_split);
 
@@ -2917,8 +2916,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let buffer = terminal.backend().buffer();
         let cards = &app.view.workspace_card_areas;
         assert_eq!(buffer[(cards[0].rect.x + 1, cards[0].rect.y)].symbol(), "·");
-        assert_eq!(buffer[(cards[1].rect.x + 1, cards[1].rect.y)].symbol(), "·");
-        assert_eq!(buffer[(cards[2].rect.x + 1, cards[2].rect.y)].symbol(), "·");
+        assert_eq!(buffer[(cards[8].rect.x + 1, cards[8].rect.y)].symbol(), "·");
+        assert_eq!(buffer[(cards[9].rect.x + 1, cards[9].rect.y)].symbol(), "·");
 
         app.mode = Mode::Navigate;
         let mut nav_terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
@@ -2935,7 +2934,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .unwrap();
         let nav_buffer = nav_terminal.backend().buffer();
         assert_eq!(nav_buffer[(cards[0].rect.x + 1, cards[0].rect.y)].symbol(), "1");
-        assert_eq!(nav_buffer[(cards[1].rect.x + 1, cards[1].rect.y)].symbol(), "2");
-        assert_eq!(nav_buffer[(cards[2].rect.x + 1, cards[2].rect.y)].symbol(), "3");
+        assert_eq!(nav_buffer[(cards[8].rect.x + 1, cards[8].rect.y)].symbol(), "9");
+        // 10th workspace exceeds single-digit shortcut range 1..9, so state_icon is retained as "·"
+        assert_eq!(nav_buffer[(cards[9].rect.x + 1, cards[9].rect.y)].symbol(), "·");
     }
 }
