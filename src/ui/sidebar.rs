@@ -775,15 +775,17 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         return;
     }
 
-    for (visible_idx, ws) in app.workspaces.iter().enumerate() {
-        let y = ws_area.y + visible_idx as u16;
+    let visible_order = app.visible_workspace_order();
+    for (pos, &ws_idx) in visible_order.iter().enumerate() {
+        let y = ws_area.y + pos as u16;
         if y >= ws_area.y + ws_area.height {
             break;
         }
+        let ws = &app.workspaces[ws_idx];
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
         let (icon, icon_style) = state_dot(agg_state, agg_seen, p);
-        let is_selected = visible_idx == app.selected && is_navigating;
-        let is_active = Some(visible_idx) == app.active;
+        let is_selected = ws_idx == app.selected && is_navigating;
+        let is_active = Some(ws_idx) == app.active;
         let row_style = if is_selected {
             Style::default().bg(p.surface0)
         } else if is_active {
@@ -806,12 +808,22 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
             }
         }
 
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(format!("{}", visible_idx + 1), num_style),
+        let position = pos + 1;
+        let line_spans = if position <= 9 {
+            vec![
+                Span::styled(format!("{position}"), num_style),
                 Span::styled(" ", row_style),
                 Span::styled(icon, icon_style),
-            ])),
+            ]
+        } else {
+            vec![
+                Span::styled(format!("{position}"), num_style),
+                Span::styled(icon, icon_style),
+            ]
+        };
+
+        frame.render_widget(
+            Paragraph::new(Line::from(line_spans)),
             Rect::new(ws_area.x, y, ws_area.width, 1),
         );
     }
@@ -1227,7 +1239,10 @@ fn render_workspace_list(
         let is_dragged = dragged_ws_idx == Some(i);
         let highlighted = selected || is_active || is_dragged;
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
-        let visual_idx = visible_order.iter().position(|idx| *idx == i).map(|pos| pos + 1);
+        let visual_idx = visible_order
+            .iter()
+            .position(|idx| *idx == i)
+            .map(|pos| pos + 1);
 
         if highlighted {
             let bg = if selected {
@@ -2933,9 +2948,45 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             })
             .unwrap();
         let nav_buffer = nav_terminal.backend().buffer();
-        assert_eq!(nav_buffer[(cards[0].rect.x + 1, cards[0].rect.y)].symbol(), "1");
-        assert_eq!(nav_buffer[(cards[8].rect.x + 1, cards[8].rect.y)].symbol(), "9");
+        assert_eq!(
+            nav_buffer[(cards[0].rect.x + 1, cards[0].rect.y)].symbol(),
+            "1"
+        );
+        assert_eq!(
+            nav_buffer[(cards[8].rect.x + 1, cards[8].rect.y)].symbol(),
+            "9"
+        );
         // 10th workspace exceeds single-digit shortcut range 1..9, so state_icon is retained as "·"
-        assert_eq!(nav_buffer[(cards[9].rect.x + 1, cards[9].rect.y)].symbol(), "·");
+        assert_eq!(
+            nav_buffer[(cards[9].rect.x + 1, cards[9].rect.y)].symbol(),
+            "·"
+        );
+    }
+
+    #[test]
+    fn collapsed_sidebar_workspace_list_renders_numbers_and_hides_tenth_plus() {
+        let mut app = AppState::test_new();
+        app.workspaces = (1..=10)
+            .map(|i| Workspace::test_new(&format!("ws-{i}")))
+            .collect();
+        let area = Rect::new(0, 0, 4, 30);
+        let (ws_area, _, _) = collapsed_sidebar_sections(area);
+
+        app.mode = Mode::Terminal;
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        // Positions 1..9 render single-digit number, space, and status dot "·"
+        assert_eq!(buffer[(ws_area.x, ws_area.y)].symbol(), "1");
+        assert_eq!(buffer[(ws_area.x + 2, ws_area.y)].symbol(), "·");
+        assert_eq!(buffer[(ws_area.x, ws_area.y + 8)].symbol(), "9");
+        assert_eq!(buffer[(ws_area.x + 2, ws_area.y + 8)].symbol(), "·");
+
+        // 10th workspace renders 2-digit number "10" followed immediately by status dot "·"
+        assert_eq!(buffer[(ws_area.x, ws_area.y + 9)].symbol(), "1");
+        assert_eq!(buffer[(ws_area.x + 1, ws_area.y + 9)].symbol(), "0");
+        assert_eq!(buffer[(ws_area.x + 2, ws_area.y + 9)].symbol(), "·");
     }
 }
