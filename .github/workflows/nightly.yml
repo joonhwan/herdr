@@ -58,13 +58,26 @@ jobs:
           $tagName = "nightly-" + (Get-Date -Format "yyyy.MM.dd-HHmm")
           "tag_name=$tagName" | Out-File -Encoding utf8 -Append $env:GITHUB_OUTPUT
 
-      - name: Create Windows Nightly Release
+      - name: Create Dated Nightly Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: "Herdr Windows Nightly (${{ steps.tag.outputs.tag_name }})"
           body: |
             Automated Windows Nightly Build for Herdr.
+            Built from branch `deploy` (commit ${{ github.sha }}).
+          prerelease: true
+          files: herdr-windows-x86_64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Fixed Nightly Release for Scoop
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Herdr Windows Nightly (Latest)"
+          body: |
+            Latest Automated Windows Nightly Build for Herdr.
             Built from branch `deploy` (commit ${{ github.sha }}).
           prerelease: true
           files: herdr-windows-x86_64.zip
