@@ -54,7 +54,8 @@ scoop update
 scoop update herdr-nightly
 ```
 
-*(강제 재설치가 필요한 경우: `scoop install --force herdr-nightly`)*
+*(버전 비교를 무시하고 강제로 다시 받아야 하는 경우: `scoop update -f herdr-nightly`.
+`--force`는 `scoop install`이 아니라 `scoop update`의 옵션입니다.)*
 
 ### 버전 체계 (동작 원리)
 
@@ -109,12 +110,13 @@ scoop bucket rm my-herdr
 방식으로 설치된 상태) 아래처럼 캐시를 지우고 강제 재설치하면 초기화됩니다.
 
 ```powershell
-scoop cache rm herdr-nightly
-scoop install -f herdr-nightly
+scoop update                        # 버킷을 먼저 pull
+scoop update -f -k herdr-nightly    # -f: 버전 비교 무시, -k: 다운로드 캐시 무시
 ```
 
-캐시를 먼저 지워야 하는 이유는, Scoop 캐시 파일명이 `앱#버전#URL해시.zip`이라서 버전과
-URL이 같으면 네트워크로 다시 받지 않고 옛 zip을 그대로 쓰기 때문입니다.
+`-k`(캐시 무시)를 붙이는 이유는, Scoop 캐시 파일명이 `앱#버전#URL해시.zip`이라서 버전과
+URL이 같으면 네트워크로 다시 받지 않고 옛 zip을 그대로 쓰기 때문입니다. 캐시를 아예
+지우고 싶다면 `scoop cache rm herdr-nightly`를 먼저 실행하면 됩니다.
 
 ### Q3. 기존 공식 `herdr`와 바이너리 충돌이 발생하는 경우
 - 만약 기존 공식 `herdr` 패키지가 Scoop으로 이미 설치되어 있다면 `shims/herdr.exe` 이름이 겹칠 수 있습니다.
