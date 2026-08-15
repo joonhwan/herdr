@@ -56,6 +56,29 @@ scoop update herdr-nightly
 
 *(강제 재설치가 필요한 경우: `scoop install --force herdr-nightly`)*
 
+### 버전 체계 (동작 원리)
+
+`bucket/herdr-nightly.json`은 **날짜 태그 릴리스를 그때그때 고정해서 가리킵니다.**
+
+```json
+"version": "2026.08.15-2319",
+"url": ".../releases/download/nightly-2026.08.15-2319/herdr-windows-x86_64.zip",
+"hash": "02bf5078..."
+```
+
+`.github/workflows/nightly.yml`이 빌드를 마치면 이 세 값을 새 태그로 갱신해서 `deploy`
+브랜치에 되커밋합니다. Scoop은 버킷을 `git pull`한 뒤 매니페스트의 `version`이 설치된
+버전보다 새로우면 업데이트하므로, 이렇게 버전이 매번 바뀌어야 `scoop update`가 동작합니다.
+
+> `nightly` 고정 태그 릴리스는 "항상 최신" 다운로드 링크용으로 남아 있지만, Scoop은
+> 더 이상 이 태그를 쓰지 않습니다. 매니페스트 `version`이 안 바뀌면 Scoop은 업데이트가
+> 없다고 판단해서 그냥 넘어가고, 다운로드 캐시(`앱#버전#URL해시.zip`)도 옛 zip을
+> 재사용하기 때문입니다.
+
+Scoop의 `checkver` / `autoupdate` 필드는 일부러 넣지 않았습니다. 이 필드는 `scoop update`
+때 실행되는 게 아니라 버킷 관리자가 매니페스트를 갱신할 때 쓰는 것이고, 여기서는 CI가
+그 역할을 직접 하기 때문입니다.
+
 ---
 
 ## 5. 삭제 (Uninstall)
@@ -79,7 +102,21 @@ scoop bucket rm my-herdr
   git -C "$env:USERPROFILE\scoop\buckets\my-herdr" checkout deploy
   ```
 
-### Q2. 기존 공식 `herdr`와 바이너리 충돌이 발생하는 경우
+### Q2. `scoop update herdr-nightly`가 아무것도 안 하고 넘어가는 경우
+
+`scoop status`는 `Everything is ok!`인데 새 빌드가 분명히 올라와 있다면, 설치된 버전
+문자열이 매니페스트 버전보다 크게 판정되고 있는 경우입니다. (예: 예전 `nightly-20260814`
+방식으로 설치된 상태) 아래처럼 캐시를 지우고 강제 재설치하면 초기화됩니다.
+
+```powershell
+scoop cache rm herdr-nightly
+scoop install -f herdr-nightly
+```
+
+캐시를 먼저 지워야 하는 이유는, Scoop 캐시 파일명이 `앱#버전#URL해시.zip`이라서 버전과
+URL이 같으면 네트워크로 다시 받지 않고 옛 zip을 그대로 쓰기 때문입니다.
+
+### Q3. 기존 공식 `herdr`와 바이너리 충돌이 발생하는 경우
 - 만약 기존 공식 `herdr` 패키지가 Scoop으로 이미 설치되어 있다면 `shims/herdr.exe` 이름이 겹칠 수 있습니다.
 - **해결방법 1 (추천)**: 기존 패키지 제거 후 nightly 설치
   ```powershell

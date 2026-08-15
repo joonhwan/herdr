@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - deploy
+    # The manifest commit this workflow pushes back to deploy must not
+    # re-trigger the workflow.
+    paths-ignore:
+      - "bucket/**"
   workflow_dispatch:
 
 permissions:
@@ -71,7 +75,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update Fixed Nightly Release for Scoop
+      # Convenience "always latest" download link. Scoop does not use this
+      # rolling tag anymore; it pins the dated release above.
+      - name: Update Rolling Latest Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
@@ -83,3 +89,43 @@ jobs:
           files: herdr-windows-x86_64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute Artifact Hash
+        id: hash
+        shell: pwsh
+        run: |
+          $sha256 = (Get-FileHash herdr-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          "sha256=$sha256" | Out-File -Encoding utf8 -Append $env:GITHUB_OUTPUT
+
+      - name: Update Scoop Manifest
+        shell: pwsh
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.tag_name }}
+          ARTIFACT_SHA256: ${{ steps.hash.outputs.sha256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Move onto whatever deploy looks like now: the build may have taken
+          # long enough for another push to land. --force discards build-time
+          # changes to tracked files; the artifact zip is untracked and stays.
+          git fetch origin deploy
+          git checkout --detach --force FETCH_HEAD
+
+          $manifestPath = "bucket/herdr-nightly.json"
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.version = $env:TAG_NAME -replace '^nightly-', ''
+          $arch = $manifest.architecture.'64bit'
+          $arch.url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG_NAME/herdr-windows-x86_64.zip"
+          $arch.hash = $env:ARTIFACT_SHA256
+          ($manifest | ConvertTo-Json -Depth 10) + "`n" | Set-Content $manifestPath -Encoding utf8 -NoNewline
+
+          if (-not (git status --porcelain -- $manifestPath)) {
+            Write-Host "manifest already up to date"
+            exit 0
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add $manifestPath
+          git commit -m "chore(scoop): publish $env:TAG_NAME"
+          git push origin HEAD:deploy
