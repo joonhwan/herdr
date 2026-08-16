@@ -41,7 +41,21 @@ jobs:
           Remove-Item -Recurse -Force vendor/libghostty-vt/.zig-cache -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force vendor/libghostty-vt/zig-out -ErrorAction SilentlyContinue
 
+      # Must run before the build: the build id is baked into the binary at
+      # compile time via option_env!, so `herdr --version` reports
+      # 0.8.0-nightly.<date code> matching the Scoop manifest version.
+      - name: Generate Release Tag Name
+        id: tag
+        shell: pwsh
+        run: |
+          $buildId = Get-Date -Format "yyyy.MM.dd-HHmm"
+          "build_id=$buildId" | Out-File -Encoding utf8 -Append $env:GITHUB_OUTPUT
+          "tag_name=nightly-$buildId" | Out-File -Encoding utf8 -Append $env:GITHUB_OUTPUT
+
       - name: Build Windows Binary
+        env:
+          HERDR_BUILD_CHANNEL: nightly
+          HERDR_BUILD_ID: ${{ steps.tag.outputs.build_id }}
         run: cargo build --release --locked --target x86_64-pc-windows-msvc
 
       - name: Package Windows Artifact
@@ -54,13 +68,6 @@ jobs:
             -PackagePath $package `
             -StageDir $stage `
             -OutputPath herdr-windows-x86_64.zip
-
-      - name: Generate Release Tag Name
-        id: tag
-        shell: pwsh
-        run: |
-          $tagName = "nightly-" + (Get-Date -Format "yyyy.MM.dd-HHmm")
-          "tag_name=$tagName" | Out-File -Encoding utf8 -Append $env:GITHUB_OUTPUT
 
       - name: Create Dated Nightly Release
         uses: softprops/action-gh-release@v2
@@ -101,6 +108,7 @@ jobs:
         shell: pwsh
         env:
           TAG_NAME: ${{ steps.tag.outputs.tag_name }}
+          BUILD_ID: ${{ steps.tag.outputs.build_id }}
           ARTIFACT_SHA256: ${{ steps.hash.outputs.sha256 }}
         run: |
           $ErrorActionPreference = "Stop"
@@ -113,7 +121,8 @@ jobs:
 
           $manifestPath = "bucket/herdr-nightly.json"
           $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-          $manifest.version = $env:TAG_NAME -replace '^nightly-', ''
+          # Same string the binary reports as 0.8.0-nightly.<build id>.
+          $manifest.version = $env:BUILD_ID
           $arch = $manifest.architecture.'64bit'
           $arch.url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG_NAME/herdr-windows-x86_64.zip"
           $arch.hash = $env:ARTIFACT_SHA256
