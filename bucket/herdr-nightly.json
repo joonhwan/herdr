@@ -1,12 +1,12 @@
 {
-  "version": "2026.08.16-0000",
+  "version": "2026.08.16-0612",
   "description": "Terminal based agent runtime for coding agents (Fork Nightly Build)",
   "homepage": "https://github.com/joonhwan/herdr",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/joonhwan/herdr/releases/download/nightly-2026.08.16-0000/herdr-windows-x86_64.zip",
-      "hash": "1035323b5ab44cfff4025d064faafeb87ef85c0ed561e0ef5b4f30ae2d8ff2e2",
+      "url": "https://github.com/joonhwan/herdr/releases/download/nightly-2026.08.16-0612/herdr-windows-x86_64.zip",
+      "hash": "7cf114bd484c5844f403120fd4b9a95c24f915d7a9053953fde6e0905838f784",
       "bin": "herdr.exe"
     }
   }
