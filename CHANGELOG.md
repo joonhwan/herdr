@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.8.1] - 2026-08-18
+
 ### Added
 - CLI help now points coding agents to Herdr's plain-text guide, documentation index, and built-in control skill.
 - Added Qwen Code detection for idle, working, and user-confirmation states, plus optional native session restore. (#2730, #2743)
