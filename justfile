@@ -9,7 +9,6 @@ test:
     just maintenance-test
     just ui-hot-path-architecture-test
     just integration-assets-test
-    just plugin-marketplace-test
     just docs-contract-test
 
 # Run repository maintenance contract tests
@@ -41,7 +40,6 @@ ci filter='all()': lint
     just maintenance-test
     just ui-hot-path-architecture-test
     just integration-assets-test
-    just plugin-marketplace-test
 
 # Run Windows target lint from Unix/macOS to catch cfg(windows) compile and clippy failures before CI
 [unix]
@@ -90,9 +88,9 @@ integration-assets-test:
     bun test src/integration/assets/opencode/herdr-agent-state.test.ts
     bun test src/integration/assets/opencode/herdr-tui-session.test.ts
 
-# Run plugin marketplace Worker tests
-plugin-marketplace-test:
-    cd workers/plugin-marketplace && bun install --frozen-lockfile && bun test
+# Regenerate the C API bindings with bindgen-cli 0.72.1
+libghostty-bindings *clang_args:
+    bash scripts/generate_libghostty_bindings.sh {{clang_args}}
 
 # Build the vendored libghostty-vt source dist
 build-libghostty-vt:

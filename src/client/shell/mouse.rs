@@ -2,6 +2,7 @@ use super::*;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 const SELECTION_AUTOSCROLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(30);
+const SELECTION_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 impl ClientShellState {
     fn set_sidebar_width_from_column(&mut self, column: u16, outcome: &mut ClientShellInput) {
@@ -313,11 +314,26 @@ impl ClientShellState {
         true
     }
 
+    pub(super) fn request_selection_drag_repaint(&mut self, now: std::time::Instant) -> bool {
+        let deadline = self
+            .last_composed_at
+            .map(|last| last + SELECTION_REPAINT_INTERVAL);
+        self.selection_repaint_deadline = deadline.filter(|deadline| now < *deadline);
+        self.selection_repaint_deadline.is_none()
+    }
+
     pub(crate) fn tick_selection_autoscroll(
         &mut self,
         now: std::time::Instant,
     ) -> ClientShellInput {
         let mut outcome = ClientShellInput::default();
+        if self
+            .selection_repaint_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.selection_repaint_deadline = None;
+            outcome.repaint = true;
+        }
         if self
             .selection_autoscroll_deadline
             .is_none_or(|deadline| now < deadline)
@@ -480,7 +496,11 @@ impl ClientShellState {
             .map(|hit| (Some(hit.workspace_id.clone()), hit.rect.y.saturating_sub(1)))
             .collect::<Vec<_>>();
         let snapshot = self.snapshot.as_deref()?;
-        let entries = render::workspace_entries(snapshot, &self.collapsed_groups);
+        let empty_collapsed_groups = HashSet::new();
+        let collapsed_groups = self
+            .collapsed_groups_for_endpoint(&self.active_endpoint_id)
+            .unwrap_or(&empty_collapsed_groups);
+        let entries = render::workspace_entries(snapshot, collapsed_groups);
         let last_hit = self
             .hits
             .workspaces
@@ -603,6 +623,16 @@ impl ClientShellState {
 
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
         let point = (mouse.column, mouse.row);
+        if self.mode == ClientShellMode::Navigate
+            && self.workspace_preview_action_blocked()
+            && self.overlay.is_none()
+            && !self.mobile_layout_active()
+            && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        {
+            self.mode = self.copy_or_terminal_mode();
+            self.navigate_workspace_id = None;
+            outcome.repaint = true;
+        }
         if matches!(self.overlay, Some(ClientShellOverlay::Onboarding)) {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left)
                 && super::contains(self.hits.overlay_primary, point)
@@ -1638,7 +1668,9 @@ impl ClientShellState {
             });
             if let Some(hit) = selection_hit {
                 self.update_selection_drag(&hit, mouse.column, mouse.row, outcome);
-                outcome.repaint = true;
+                // Consume every motion, but do not rebuild a frame for every intermediate position.
+                outcome.repaint |= !outcome.actions.is_empty()
+                    || self.request_selection_drag_repaint(std::time::Instant::now());
                 return;
             }
         }
@@ -1651,7 +1683,11 @@ impl ClientShellState {
             if copied && self.config.copy_on_select {
                 self.request_selection_copy(outcome, false);
                 self.selection = None;
-            } else if !copied {
+            } else if self
+                .selection
+                .as_ref()
+                .is_some_and(crate::selection::Selection::is_just_click)
+            {
                 self.selection = None;
             }
             if copied {
@@ -1972,17 +2008,15 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                     return;
                 }
-                for hit in &self.hits.workspaces {
-                    if let Some((rect, key)) = &hit.group_toggle {
-                        if super::contains(*rect, point) {
-                            if !self.collapsed_groups.remove(key) {
-                                self.collapsed_groups.insert(key.clone());
-                            }
-                            outcome.repaint = true;
-                            self.persist_chrome_preferences(outcome);
-                            return;
-                        }
-                    }
+                let group_toggle = self.hits.workspaces.iter().find_map(|hit| {
+                    let (rect, key) = hit.group_toggle.as_ref()?;
+                    super::contains(*rect, point).then(|| (hit.endpoint_id.clone(), key.clone()))
+                });
+                if let Some((endpoint_id, key)) = group_toggle {
+                    self.toggle_collapsed_group(&endpoint_id, key);
+                    outcome.repaint = true;
+                    self.persist_chrome_preferences(outcome);
+                    return;
                 }
                 let workspace_press = self
                     .hits
