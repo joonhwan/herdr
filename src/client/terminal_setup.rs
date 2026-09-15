@@ -265,16 +265,30 @@ pub(super) fn effective_sgr_pixel_mouse(
     enabled && requested && exact_geometry
 }
 
+/// Reports whether the native Windows client asks the host for VT mouse reports.
+///
+/// Virtual terminal input withholds console mouse records and rewrites the wheel
+/// as cursor keys, so the client needs VT reports to see the mouse at all. Set
+/// `HERDR_WINDOWS_HOST_MOUSE` to `native` to fall back to console capture, which
+/// trades the wheel and pane clicks for a path that cannot corrupt reports.
+#[cfg(any(windows, test))]
+pub(super) fn windows_host_vt_mouse_reporting_enabled() -> bool {
+    std::env::var("HERDR_WINDOWS_HOST_MOUSE")
+        .map(|mode| !mode.eq_ignore_ascii_case("native"))
+        .unwrap_or(true)
+}
+
 #[cfg(any(windows, test))]
 fn set_windows_native_mouse_capture<W: io::Write>(
     writer: &mut W,
     enabled: bool,
     sgr_pixels: bool,
+    host_vt_reporting: bool,
     set_console_capture: impl FnOnce(bool) -> io::Result<()>,
 ) -> io::Result<()> {
     crate::terminal_modes::clear_host_mouse_reporting(writer)?;
     set_console_capture(enabled)?;
-    if enabled {
+    if enabled && host_vt_reporting {
         crate::terminal_modes::set_windows_mouse_reporting(writer, true, sgr_pixels)?;
     }
     Ok(())
@@ -291,17 +305,23 @@ pub(super) fn set_mouse_capture(enabled: bool, sgr_pixels: bool) -> io::Result<(
         );
     }
     #[cfg(windows)]
-    return set_windows_native_mouse_capture(&mut io::stdout(), enabled, sgr_pixels, |enabled| {
-        if enabled {
-            execute!(io::stdout(), EnableMouseCapture)
-        } else {
-            match execute!(io::stdout(), DisableMouseCapture) {
-                Ok(()) => Ok(()),
-                Err(err) if err.to_string() == "Initial console modes not set" => Ok(()),
-                Err(err) => Err(err),
+    return set_windows_native_mouse_capture(
+        &mut io::stdout(),
+        enabled,
+        sgr_pixels,
+        windows_host_vt_mouse_reporting_enabled(),
+        |enabled| {
+            if enabled {
+                execute!(io::stdout(), EnableMouseCapture)
+            } else {
+                match execute!(io::stdout(), DisableMouseCapture) {
+                    Ok(()) => Ok(()),
+                    Err(err) if err.to_string() == "Initial console modes not set" => Ok(()),
+                    Err(err) => Err(err),
+                }
             }
-        }
-    });
+        },
+    );
     #[cfg(not(windows))]
     crate::terminal_modes::clear_host_mouse_reporting(&mut io::stdout())?;
     #[cfg(not(windows))]
@@ -477,10 +497,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn windows_native_mouse_capture_leaves_host_reporting_cleared() {
+        let mut output = Vec::new();
+        let mut captured = None;
+
+        set_windows_native_mouse_capture(&mut output, true, false, false, |enabled| {
+            captured = Some(enabled);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(captured, Some(true));
+        assert_eq!(
+            output,
+            b"\x1b[?1006l\x1b[?1016l\x1b[?1015l\x1b[?1005l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?9l"
+        );
+    }
+
+    #[test]
     fn windows_native_mouse_capture_restores_reporting_after_reset() {
         let mut output = Vec::new();
 
-        set_windows_native_mouse_capture(&mut output, true, false, |enabled| {
+        set_windows_native_mouse_capture(&mut output, true, false, true, |enabled| {
             assert!(enabled);
             Ok(())
         })
@@ -488,7 +526,7 @@ mod tests {
 
         assert_eq!(
             output,
-            b"\x1b[?1006l\x1b[?1016l\x1b[?1015l\x1b[?1005l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?9l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1016l"
+            b"\x1b[?1006l\x1b[?1016l\x1b[?1015l\x1b[?1005l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?9l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h"
         );
     }
 }

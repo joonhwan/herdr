@@ -103,6 +103,20 @@ fn windows_virtual_terminal_input_mode_sets_only_vti_bit() {
 }
 
 #[test]
+fn windows_host_vt_mouse_reporting_defaults_to_vt_and_honors_override() {
+    let _guard = env_lock().lock().unwrap();
+    let _removed = EnvVarsRemovedGuard::new(&["HERDR_WINDOWS_HOST_MOUSE"]);
+
+    assert!(windows_host_vt_mouse_reporting_enabled());
+    {
+        let _native = EnvVarGuard::set("HERDR_WINDOWS_HOST_MOUSE", "NaTiVe");
+        assert!(!windows_host_vt_mouse_reporting_enabled());
+    }
+    let _vt = EnvVarGuard::set("HERDR_WINDOWS_HOST_MOUSE", "vt");
+    assert!(windows_host_vt_mouse_reporting_enabled());
+}
+
+#[test]
 fn windows_win32_input_mode_defaults_to_vt_and_honors_probe() {
     let _guard = env_lock().lock().unwrap();
     let _removed =

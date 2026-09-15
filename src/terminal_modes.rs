@@ -26,12 +26,12 @@ pub(crate) fn set_windows_mouse_reporting<W: Write>(
     } else {
         WINDOWS_MOUSE_REPORTING_DISABLE_SEQUENCE
     })?;
-    if enabled {
-        writer.write_all(if sgr_pixels {
-            b"\x1b[?1016h"
-        } else {
-            b"\x1b[?1016l"
-        })?;
+    // Never trail the enable burst with `?1016l`. Hosts that model the mouse
+    // encoding as one value reset it to the default X10 form instead of falling
+    // back to SGR, which caps coordinates at 94 and corrupts wider reports.
+    // Callers clear every mouse mode, `?1016l` included, right before this.
+    if enabled && sgr_pixels {
+        writer.write_all(b"\x1b[?1016h")?;
     }
     writer.flush()
 }
@@ -197,7 +197,20 @@ mod tests {
 
         assert_eq!(
             output,
-            b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1016l\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l"
+            b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1016h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?1016l\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l"
+        );
+    }
+
+    #[test]
+    fn windows_mouse_reporting_never_trails_sgr_with_a_pixel_reset() {
+        let mut output = Vec::new();
+
+        set_windows_mouse_reporting(&mut output, true, false).unwrap();
+
+        assert!(
+            output.ends_with(b"\x1b[?1006h"),
+            "SGR must stay the last encoding requested, got {:?}",
+            String::from_utf8_lossy(&output)
         );
     }
 }
