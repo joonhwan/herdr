@@ -45,6 +45,83 @@ fn shell_new_controls_use_the_same_client_action_routes_as_keybinds() {
 }
 
 #[test]
+fn remote_client_preferences_keep_the_same_identity_across_bridge_processes() {
+    let first = ClientShellConfig::from_config(&Config::default()).with_endpoint_preferences(
+        std::path::Path::new("/tmp/herdr-remote-100-dev-agents.sock"),
+        Some(r#"["dev", "agents"]"#),
+    );
+    let next = ClientShellConfig::from_config(&Config::default()).with_endpoint_preferences(
+        std::path::Path::new("/tmp/herdr-remote-200-dev-agents.sock"),
+        Some(r#"["dev", "agents"]"#),
+    );
+    assert_eq!(first.preferences_path, next.preferences_path);
+    let root =
+        std::env::temp_dir().join(format!("herdr-remote-preferences-{}", std::process::id()));
+    let first_path = root.join(
+        first
+            .preferences_path
+            .as_ref()
+            .unwrap()
+            .file_name()
+            .unwrap(),
+    );
+    let next_path = root.join(next.preferences_path.as_ref().unwrap().file_name().unwrap());
+    let mut state = ClientShellState::new(first.with_preferences_path(first_path));
+    state.sidebar_width = 31;
+    state.sidebar_width_manual = true;
+    state.sidebar_collapsed = true;
+    state.sidebar_collapsed_manual = true;
+    state.persist_chrome_preferences(&mut ClientShellInput::default());
+    let restored = ClientShellState::new(next.with_preferences_path(next_path));
+    assert_eq!(restored.sidebar_width, 31);
+    assert!(restored.sidebar_collapsed);
+    std::fs::remove_dir_all(root).unwrap();
+
+    let local_socket = std::path::Path::new("/tmp/local.sock");
+    for identity in [
+        None,
+        Some("invalid"),
+        Some(r#"["dev", ""]"#),
+        Some(r#"["", "agents"]"#),
+    ] {
+        let config = ClientShellConfig::from_config(&Config::default())
+            .with_endpoint_preferences(local_socket, identity);
+        assert_eq!(
+            config.preferences_path,
+            Some(super::super::preferences::path_for_local_endpoint(
+                local_socket
+            ))
+        );
+    }
+}
+
+#[test]
+fn remote_client_preferences_process_child() {
+    if std::env::var("HERDR_TEST_PREFERENCES_CHILD").as_deref() != Ok("1") {
+        return;
+    }
+    let expected_path = super::super::preferences::path_for_remote_endpoint("dev", "agents");
+    if !expected_path.exists() {
+        super::super::preferences::store(
+            expected_path.as_path(),
+            super::super::preferences::ClientChromePreferences {
+                sidebar_width: Some(31),
+                sidebar_collapsed: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    let socket = crate::server::socket_paths::client_socket_path();
+    let config = ClientShellConfig::from_config(&Config::default())
+        .with_process_endpoint_preferences(&socket);
+    assert_eq!(config.preferences_path, Some(expected_path));
+    let restored = ClientShellState::new(config);
+    assert_eq!(restored.sidebar_width, 31);
+    assert!(restored.sidebar_collapsed);
+}
+
+#[test]
 fn manual_client_chrome_preferences_round_trip_per_endpoint() {
     let path = std::env::temp_dir().join(format!(
         "herdr-client-shell-prefs-{}.json",
@@ -165,6 +242,39 @@ fn tab_bar_renders_endpoint_status_ellipses_and_clamps_to_useful_scroll() {
 }
 
 #[test]
+fn inactive_auto_named_tab_label_does_not_stack_terminal_faint() {
+    let mut projected = snapshot();
+    projected.tabs.push(ClientShellTab {
+        tab_id: "tab_2".into(),
+        workspace_id: "ws_1".into(),
+        number: 2,
+        label: "beta".into(),
+        custom_label: false,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    let frame = state.compose(106, 20).expect("tab bar frame");
+    let rect = state
+        .hits
+        .tabs
+        .iter()
+        .find(|(_, tab_id)| tab_id == "tab_2")
+        .expect("inactive tab hit")
+        .0;
+    let buffer = frame.to_ratatui_buffer().expect("tab bar buffer");
+    let (x, y) = cell_symbol_position(&frame, rect, "beta");
+    let cell = buffer.cell((x, y)).expect("inactive tab cell");
+    assert!(
+        !cell.modifier.contains(Modifier::DIM),
+        "inactive tab label at ({x},{y}) should not stack terminal faint: {cell:?}"
+    );
+}
+
+#[test]
 fn configured_prefix_is_client_owned_and_renders_its_bar() {
     let config = toml::from_str::<Config>(
         r#"
@@ -249,7 +359,7 @@ command = "local-only"
     .unwrap();
     let remote_local = ClientShellConfig::from_config(&local)
         .with_keybinding_source(ClientShellKeybindingSource::RemoteLocal);
-    assert_eq!(remote_local.keybinds.prefix.0, KeyCode::Char('a'));
+    assert_eq!(remote_local.keybinds.prefix[0].0, KeyCode::Char('a'));
     assert!(remote_local.keybinds.keybinds.custom_commands.is_empty());
     assert_eq!(
         remote_local.keybinds.keybinds.new_tab.label().as_deref(),
@@ -344,7 +454,7 @@ new_tab = "prefix+n"
         });
     state.set_snapshot(Box::new(projection));
 
-    assert_eq!(state.config.keybinds.prefix.0, KeyCode::Char('x'));
+    assert_eq!(state.config.keybinds.prefix[0].0, KeyCode::Char('x'));
     assert_eq!(
         state.config.keybinds.keybinds.new_tab.label().as_deref(),
         Some("prefix+n")
